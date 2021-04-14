@@ -2,7 +2,6 @@ import random
 import numpy as np
 import gzip
 import pickle
-#import mnist_loader
 
 # Sigmoid
 def sig(z):
