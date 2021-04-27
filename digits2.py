@@ -1,6 +1,5 @@
 import random
 import numpy as np
-import mnist_loader
 import pickle
 import gzip
 
@@ -12,11 +11,8 @@ def sig(z):
 def d_sig(z):
     return sig(z)*(1-sig(z))
 
+# Only used in data loading
 def vectorized_result(j):
-    """Return a 10-dimensional unit vector with a 1.0 in the jth
-    position and zeroes elsewhere.  This is used to convert a digit
-    (0...9) into a corresponding desired output from the neural
-    network."""
     e = np.zeros((10, 1))
     e[j] = 1.0
     return e
@@ -45,17 +41,17 @@ def load_data(filename="mnist.pkl.gz"):
 
 class Node(object):
     """
-    Class for a single node in a fully connected layer. Has a bias and array of input weights
+    Class for a single node in a fully connected layer. Has a bias and array of input weights.
     """
-    def __init__(self, prev_layer_size):
+    def __init__(self, number_of_inputs):
         # Bias for each node is initiated at random, for now. 
         self.bias = np.array([np.random.randn()])
 
         # Number of nodes in previous layer. Needed so that we know how many weights come in to specific node. 
-        self.prev_layer_size = prev_layer_size
+        self.number_of_inputs = number_of_inputs
 
         # Column vector of weights that come in to specific node. Initiated at random, for now. 
-        self.input_weights = np.random.randn(prev_layer_size,1)
+        self.input_weights = np.random.randn(number_of_inputs,1)
         
 class Layer(object):
     def __init__(self, size, prev_layer_size):
@@ -83,18 +79,43 @@ class Layer(object):
         # Running sum that holds change in weight matrix
         self.weight_sum = np.zeros(self.weights.shape)
 
+class Softmax_layer(Layer):
+    def __init__(self):
+        pass
 
-# class Softmax_layer(Layer):
-   
+    def output(self):
+        return 
 
-#     def output(self):
-#         return 
+class Pooling_layer(Layer):
+    def __init__(self):
+        pass
 
-# class Pooling_layer(Layer):
+class ConvolutionalLayer(Layer):
+    def __init__(self, num_maps, filter_shape, layer_input):
+        '''
+        "layer_input" is a rectangular numpy array of nodes. filter_shape is a tuple that gives the shape of the filter. 
+        '''
+        self.filter_width = filter_shape[0]
+        self.filter_height = filter_shape[1]
 
-# class Convolutional_layer(Layer):
+        # The layer is a grid of nodes. The size of the layer is determined by the size of the input, the filter, and the stride length.
+        # For example, if we have a 28x28 input and a 5x5 filter moved with stride length 1, we are left with a 24x24 layer, since we can 
+        # only move the filter 23 units in each direction before reaching the edge of the input. Here, we only use stride length 1. 
+        width = np.shape(layer_input)[0]-self.filter_width+1
+        height = np.shape(layer_input)[1]-self.filter_height+1
 
+        # weights and bias are initialized at random for the moment. 
+        self.weights =  np.random.randn(self.filter_width, self.filter_height)
+        self.bias = np.array([np.random.randn()])
 
+        # grid of nodes
+        self.lattice = np.empty((width,height), dtype=Node)
+        for i in range(width):
+            for j in range(height):
+                self.lattice[i][j] = Node(self.filter_width*self.filter_height)
+
+    def output(self):
+        pass
 
 class Network(object):
     def __init__(self,sizes):
@@ -198,6 +219,13 @@ class Network(object):
             layer.weight_sum = layer.weight_sum + np.matmul(layer.error, prev_layer.activation.T)
 
 
-[training_data, validation_data, test_data] = mnist_loader.load_data_wrapper()
-net = Network([784, 30, 10])
-net.train(training_data, 30, 10, 3.0, test_data=test_data)
+# [training_data, validation_data, test_data] = load_data()
+# net = Network([784, 30, 10])
+# net.train(training_data, 30, 10, 3.0, test_data=test_data)
+
+#3x3
+test_img = np.array([[1,2,3],[4,5,6],[7,8,9]])
+
+l = ConvolutionalLayer(1,2,2,test_img)
+
+print(l.lattice[0][0].bias)
