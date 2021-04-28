@@ -17,6 +17,10 @@ def vectorized_result(j):
     e[j] = 1.0
     return e
 
+# Activation for rectified linear units
+def activation(x):
+    return max(0,x)
+
 def load_data(filename="mnist.pkl.gz"):
     """
     Returns an array [training_data, validation_data, test_data]. Each "x_data" in the array is a zip constructed from a pair of arrays.
@@ -86,36 +90,75 @@ class Softmax_layer(Layer):
     def output(self):
         return 
 
-class Pooling_layer(Layer):
-    def __init__(self):
-        pass
+class Filter(object):
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+        self.weights = np.random.randn(width, height)
+        self.bias = np.random.randn()
+
+        #self.weights = np.array([[1,2],[3,4]])
+        #self.bias = 1
 
 class ConvolutionalLayer(Layer):
-    def __init__(self, num_maps, filter_shape, layer_input):
+    def __init__(self, filters, pooling_filter, layer_input):
         '''
-        "layer_input" is a rectangular numpy array of nodes. filter_shape is a tuple that gives the shape of the filter. 
+        "filters" is an array of filter object that define individual feature maps, "pooling_filter" is a filter that is used as part of the built-in
+        pooling function. layer_input" is a rectangular numpy array of nodes. 
         '''
-        self.filter_width = filter_shape[0]
-        self.filter_height = filter_shape[1]
+        
+        self.filters = filters
+        self.pooling_filter = pooling_filter
+        
+        #vector of grids, one for each feature map. This is populated in the next loop, when we have easier access to the filter shapes.
+        self.grids = []
+        self.pooled_grids = []
 
-        # The layer is a grid of nodes. The size of the layer is determined by the size of the input, the filter, and the stride length.
-        # For example, if we have a 28x28 input and a 5x5 filter moved with stride length 1, we are left with a 24x24 layer, since we can 
-        # only move the filter 23 units in each direction before reaching the edge of the input. Here, we only use stride length 1. 
-        width = np.shape(layer_input)[0]-self.filter_width+1
-        height = np.shape(layer_input)[1]-self.filter_height+1
+        
+    def output(self, layer_input):
+        for n,f in enumerate(self.filters):
+            filter_width = f.width
+            filter_height = f.height
 
-        # weights and bias are initialized at random for the moment. 
-        self.weights =  np.random.randn(self.filter_width, self.filter_height)
-        self.bias = np.array([np.random.randn()])
+            # The new layer is a grid of nodes. The size of the layer is determined by the size of the input, the filter, and the stride length.
+            # For example, if we have a 28x28 input and a 5x5 filter moved with stride length 1, we are left with a 24x24 layer, since we can 
+            # only move the filter 23 units in each direction before reaching the edge of the input. Here, we only use stride length 1. 
+            width = np.shape(layer_input)[0]-filter_width+1
+            height = np.shape(layer_input)[1]-filter_height+1
 
-        # grid of nodes
-        self.lattice = np.empty((width,height), dtype=Node)
-        for i in range(width):
-            for j in range(height):
-                self.lattice[i][j] = Node(self.filter_width*self.filter_height)
+            self.grids.append(np.zeros((width, height)))
+            for j in range(width):
+                for k in range(height):
+                    
+                    s=0
 
-    def output(self):
-        pass
+                    for l in range(filter_width):
+                        for m in range(filter_height):
+                            s += f.weights[l][m]*layer_input[j+l][k+m]
+                    
+                    self.grids[n][j][k] = activation(f.bias+s)
+
+        return self.grids
+
+    # I plan on always having a pooling layer after each convolutional layer, so instead of creating a new class, I"m just going to do the pooling 
+    # in convolutional layer class, using the unpooled output provided by the output function. 
+    def pooled_output(self):
+
+        pooling_filter_width = self.pooling_filter.width 
+        pooling_filter_height = self.pooling_filter.height
+
+        for n, g in enumerate(self.grids):
+            pooled_width = int(np.shape(g)[0]/pooling_filter_width)
+            pooled_height = int(np.shape(g)[1]/pooling_filter_height)
+
+            self.pooled_grids.append(np.zeros((pooled_width, pooled_height)))
+
+            for j in range(pooled_width):
+                for k in range(pooled_height):
+                    self.pooled_grids[n][j][k] = np.amax(g[j*pooling_filter_height:(j+1)*pooling_filter_height,k*pooling_filter_width:(k+1)*pooling_filter_width])
+
+        return self.pooled_grids            
+                    
 
 class Network(object):
     def __init__(self,sizes):
@@ -224,8 +267,20 @@ class Network(object):
 # net.train(training_data, 30, 10, 3.0, test_data=test_data)
 
 #3x3
-test_img = np.array([[1,2,3],[4,5,6],[7,8,9]])
+test_img = np.array([[1,2,3,4,5],[6,7,8,9,10],[11,12,13,14,15],[16,17,18,19,20],[21,22,23,24,25]])
 
-l = ConvolutionalLayer(1,2,2,test_img)
+f=[Filter(2,2)]
+pf = Filter(2,2)
 
-print(l.lattice[0][0].bias)
+l = ConvolutionalLayer(f,pf,test_img)
+
+print(test_img)
+
+for n,f in enumerate(l.filters):
+    print("weights: ", f.weights)
+    print("bias: ", f.bias)
+
+print(l.output(test_img))
+
+# this can't work because I need to give some reference to the input image
+print(l.pooled_output())
