@@ -11,15 +11,23 @@ def sig(z):
 def d_sig(z):
     return sig(z)*(1-sig(z))
 
+# Rectified linear unit activation function
+def relu(x):
+    return max(0,x)
+
+# Derivative of relu
+def d_relu(x):
+    if x<= 0:
+        return 0
+
+    else:
+        return 1
+
 # Only used in data loading
 def vectorized_result(j):
     e = np.zeros((10, 1))
     e[j] = 1.0
     return e
-
-# Activation for rectified linear units
-def activation(x):
-    return max(0,x)
 
 def load_data(filename="mnist.pkl.gz"):
     """
@@ -56,12 +64,12 @@ class Node(object):
 
         # Column vector of weights that come in to specific node. Initiated at random, for now. 
         self.input_weights = np.random.randn(number_of_inputs,1)
-        
+
 class Layer(object):
-    def __init__(self, size, prev_layer_size):
+    def __init__(self, size, layer_input):
         self.size = size
-        self.prev_layer_size = prev_layer_size
-        self.nodes = np.array([Node(prev_layer_size) for i in range(size)])
+        self.prev_layer_size = np.shape(layer_input)
+        self.nodes = np.array([Node(self.prev_layer_size) for i in range(size)])
         
         # Square matrix of weights. Each row contains all connections going into a single node. Rows are used instead
         # of columns so that we can write the output of a node in matrix form as output=sig(WA+B), where W is the matrix defined here, 
@@ -72,23 +80,46 @@ class Layer(object):
 
         # Column vector of biases corresponding to each node in the layer
         self.biases = np.array([n.bias for n in self.nodes])
-
-        self.activation = 0
-        self.error = 0
-        self.z = 0
-
+    
         # Running sum that holds the change to be applied to the bias vector after each minibatch
         self.bias_sum = np.zeros(self.biases.shape)
 
         # Running sum that holds change in weight matrix
         self.weight_sum = np.zeros(self.weights.shape)
 
-class Softmax_layer(Layer):
-    def __init__(self):
-        pass
+        # Sometimes, we need to reuse a previously calculated value of z, so I store it here. 
+        self.z = np.zeros(np.shape(self.biases))
 
-    def output(self):
-        return 
+    def output(self, layer_input):
+        z_temp = np.matmul(self.weights, layer_input) + np.self.biases
+        self.z = z_temp
+
+        return z_temp, sig(z_temp)
+
+    def error(self, next_layer_error, next_layer_weights):
+        return np.multiply(np.matmul(next_layer_weights.T, next_layer_error), d_sig(self.z))      
+
+class Softmax_layer(Layer):
+    def __init__(self, size, prev_layer_size):
+        super().__init__(size, prev_layer_size)
+
+    def output(self, layer_input):
+        m = np.matmul(self.weights, layer_input)
+        self.z = m.reshape(-1,1) + self.biases
+
+        s=0
+        for x in self.z:
+            s += np.exp(x)
+
+        return np.exp(self.z)/s 
+
+    # This gives the error in the final layer, if this layer type is used as the last layer in the network.
+    # Note that the mathematical expression can be different for different layer types. 
+    # Also note that I assume that a softmax layer will use log-likelhood as the cost function. 
+    #
+    # "guess" and "answer" should both be column vectors.
+    def final_error(self, guess, answer):
+        return guess - answer
 
 class Filter(object):
     def __init__(self, width, height):
@@ -100,13 +131,17 @@ class Filter(object):
         #self.weights = np.array([[1,2],[3,4]])
         #self.bias = 1
 
+        self.weight_sum = np.zeros(np.shape(self.weights))
+        self.bias_sum = np.zeros(np.shape(self.bias))
+
 class ConvolutionalLayer(Layer):
-    def __init__(self, filters, pooling_filter, layer_input):
+    def __init__(self, filters, pooling_filter):
         '''
         "filters" is an array of filter object that define individual feature maps, "pooling_filter" is a filter that is used as part of the built-in
         pooling function. layer_input" is a rectangular numpy array of nodes. 
         '''
         
+        self.layer_input = []
         self.filters = filters
         self.pooling_filter = pooling_filter
         
@@ -114,8 +149,9 @@ class ConvolutionalLayer(Layer):
         self.grids = []
         self.pooled_grids = []
 
-        
-    def output(self, layer_input):
+    # This is the output that would be fed into a pooling layer. Since I have combined the convolutional layer and the pooling layer, 
+    # this function is not the final output of the layer. 
+    def pre_output(self, layer_input):
         for n,f in enumerate(self.filters):
             filter_width = f.width
             filter_height = f.height
@@ -136,18 +172,21 @@ class ConvolutionalLayer(Layer):
                         for m in range(filter_height):
                             s += f.weights[l][m]*layer_input[j+l][k+m]
                     
-                    self.grids[n][j][k] = activation(f.bias+s)
+                    self.grids[n][j][k] = relu(f.bias+s)
 
         return self.grids
 
     # I plan on always having a pooling layer after each convolutional layer, so instead of creating a new class, I"m just going to do the pooling 
-    # in convolutional layer class, using the unpooled output provided by the output function. 
-    def pooled_output(self):
+    # in the convolutional layer class, using the unpooled output provided by the output function. 
+    def output(self):
+
+        standard_output = self.pre_output(self.layer_input)
 
         pooling_filter_width = self.pooling_filter.width 
         pooling_filter_height = self.pooling_filter.height
 
-        for n, g in enumerate(self.grids):
+       
+        for n, g in enumerate(standard_output):
             pooled_width = int(np.shape(g)[0]/pooling_filter_width)
             pooled_height = int(np.shape(g)[1]/pooling_filter_height)
 
@@ -155,39 +194,62 @@ class ConvolutionalLayer(Layer):
 
             for j in range(pooled_width):
                 for k in range(pooled_height):
-                    self.pooled_grids[n][j][k] = np.amax(g[j*pooling_filter_height:(j+1)*pooling_filter_height,k*pooling_filter_width:(k+1)*pooling_filter_width])
 
-        return self.pooled_grids            
-                    
+                    # Take the largest value in region selected by filter
+                    self.pooled_grids[n][j][k] = np.amax(g[j*pooling_filter_height:(j+1)*pooling_filter_height, k*pooling_filter_width:(k+1)*pooling_filter_width])
+       
+        return self.pooled_grids    
+
+    # Gives the error for a particular layer in terms of the error in the next layer in the network.
+    # See derivation at https://www.jefkine.com/general/2016/09/05/backpropagation-in-convolutional-neural-networks/
+    def error(self, next_layer_error, next_layer_weights):
+        for n,f in enumerate(self.filters):
+            error_vec = []
+            error_vec.append(np.zeros(np.shape(f)))
+            s = 0
+
+            for x in range(f.width):
+                for y in range(f.height):
+                    s += next_layer_error[x-n][y-m] * next_layer_weights[x][y] * d_relu(self.pre_output(self.layer_input))
+
+            error_vec[n][x][y] = s
+        
+        return error_vec
 
 class Network(object):
-    def __init__(self,sizes):
-        # Array of number of nodes in each layer
-        self.sizes = sizes
-        
-        # Prepends zero to list of layer sizes so that the first layer doesn't get any incoming weights.
-        self.sizes.insert(0,0)
+    def __init__(self,layers):
+        """
+        "layers" is an array that holds layer objects of various types. The last element should be 10-dimensional, fully-connected layer. 
+        """
 
-        # Array of layers of varying size
-        self.layers = []
-        for i in range(1,len(self.sizes)):
-            self.layers.append(Layer(self.sizes[i],self.sizes[i-1]))
+        self.layers = layers
 
         # Array that stores predicted digit for each input in test data
         self.test_outputs = []
+
+    def cost(self, x, lam, weights, n):
+        
+        # We use L2 regularization to help with overfitting.
+        s = 0
+        for i in range(np.shape(weights)[0]):
+            for j in range(np.shape(weights)[1]):
+                s += (weights[i][j])**2
+        
+        return -np.log(x) + lam*s/(2.0*n)
 
     def train(self, training_data, epochs, batch_size, rate, test_data):
         
         # A subset of data that we can compare with after each batch to check progress. 
         test_data = list(test_data)
-        n_test = len(test_data)
+        n_test = len(test_data)        
+
+        #validation_data = list(validation_data)
+        #n_val = len(validation_data)
         
-        # Data is list of tuples (x,y), where x is a 784-dimensional numpy array that holds the input image and y is a 10-dimensional
+        # Data is list of tuples (x,y), where x is a 28x28-dimensional numpy array that holds the input image and y is a 10-dimensional
         # numpy array that indicates the correct number that corresponds to the image. 
         training_data = list(training_data)
-        
-        # Total number of inputs to train with
-        n = len(training_data)
+        n_train = len(training_data)
 
         # Repeatedly train on shuffled dataset 
         for i in range(epochs):
@@ -197,7 +259,7 @@ class Network(object):
 
             # Randomly shuffle training data and partition into subsets for batch training
             random.shuffle(training_data)
-            batches = [training_data[j:j+batch_size] for j in range(0, n, batch_size)]
+            batches = [training_data[j:j+batch_size] for j in range(0, n_train, batch_size)]
             
             for batch in batches:
                 self.backpropagate(batch, rate)
@@ -214,43 +276,21 @@ class Network(object):
             num_correct = sum(int(drawing == answer) for (drawing, answer) in test_results)
             print("Epoch ", i+1,': ', num_correct, '/', n_test)
             
-    def backpropagate(self, batch, rate):
-        m = len(batch)
-        
-        for drawing, answer in batch:                    
-            self.forward_pass(drawing)
-            
-            layer = self.layers[-1]
-            # The final layer's activation error needs to be calculated so we can compare to the desired result. 
-            layer.error = np.multiply(layer.activation-answer,d_sig(layer.z))
-
-            self.backwards_pass()               
-        
-        self.update_network(rate, m)
-        
-
     def forward_pass(self, data):
-        # Set input layer
-        self.layers[0].activation = data
+            # Set input layer
+            self.layers[0].layer_input = data
+            
+            # Iterate over layers after the input
+            for k in range(1,len(self.layers)):
+                layer = self.layers[k]
+                prev_layer = self.layers[k-1]
 
-        # Forward pass - iterate over layers after the input
-        for k in range(1,len(self.layers)):
-            layer = self.layers[k]
-            prev_layer = self.layers[k-1]
+                layer.layer_input = prev_layer.output(prev_layer.layer_input)
+            
+            return (layer.output(layer.layer_input), layer.z)
 
-            layer.z = np.matmul(layer.weights, prev_layer.activation)+np.reshape(layer.biases,(len(layer.biases),1))
-            layer.activation = sig(layer.z)
-
-    def update_network(self, rate, batch_size):
-        # update weights and biases and reset sums for next batch
-        for layer in self.layers:
-            layer.weights -= (rate/batch_size)* layer.weight_sum
-            layer.biases -= (rate/batch_size)* layer.bias_sum 
-
-            layer.weight_sum = np.zeros(layer.weights.shape)
-            layer.bias_sum = np.zeros(layer.biases.shape)
-
-    def backwards_pass(self):
+    # correct this too
+    def backwards_pass(self, last_layer_error):
         # Backwards pass
         for l in range(len(self.layers)-2,0,-1):
             layer = self.layers[l]
@@ -261,26 +301,46 @@ class Network(object):
             layer.bias_sum = layer.bias_sum + layer.error
             layer.weight_sum = layer.weight_sum + np.matmul(layer.error, prev_layer.activation.T)
 
+    # this needs to be modified to reflect the changes made to forward_pass
+    def backpropagate(self, batch, rate):
+        m = len(batch)
+        
+        for drawing, answer in batch:                    
+            result = self.forward_pass(drawing)
+            
+            layer = self.layers[-1]
 
-# [training_data, validation_data, test_data] = load_data()
-# net = Network([784, 30, 10])
-# net.train(training_data, 30, 10, 3.0, test_data=test_data)
+            # The final layer's activation error needs to be calculated so we can compare to the desired result. 
+            delta = np.multiply(result-answer, layer.activation(layer.z))
 
-#3x3
-test_img = np.array([[1,2,3,4,5],[6,7,8,9,10],[11,12,13,14,15],[16,17,18,19,20],[21,22,23,24,25]])
+            self.backwards_pass(delta)               
+        
+        self.update_network(rate, m)
 
-f=[Filter(2,2)]
-pf = Filter(2,2)
+    def update_network(self, rate, batch_size):
+        # update weights and biases and reset sums for next batch
+        for layer in self.layers:
+            layer.weights -= (rate/batch_size)* layer.weight_sum
+            layer.biases -= (rate/batch_size)* layer.bias_sum 
 
-l = ConvolutionalLayer(f,pf,test_img)
+            layer.weight_sum = np.zeros(layer.weights.shape)
+            layer.bias_sum = np.zeros(layer.biases.shape)
 
-print(test_img)
+    
 
-for n,f in enumerate(l.filters):
-    print("weights: ", f.weights)
-    print("bias: ", f.bias)
+#[training_data, validation_data, test_data] = load_data()
+#net = Network([784, 30, 10])
+#net = Network([Layer(784), Layer(), Layer()])
+#net.train(training_data, 30, 10, 3.0, test_data=test_data)
 
-print(l.output(test_img))
+#5x5
+# test_img = np.array([[1,2,3,4,5],[6,7,8,9,10],[11,12,13,14,15],[16,17,18,19,20],[21,22,23,24,25]])
+#test_img = np.array([[1,2,3],[4,5,6],[7,8,9]])
+# f = [Filter(2,2)]
+# pf = Filter(2,2)
 
-# this can't work because I need to give some reference to the input image
-print(l.pooled_output())
+
+# l = ConvolutionalLayer(f,pf)
+# l.layer_input = test_img
+# out = l.output()
+# print(out)
