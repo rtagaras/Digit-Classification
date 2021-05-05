@@ -90,14 +90,20 @@ class Layer(object):
         # Sometimes, we need to reuse a previously calculated value of z, so I store it here. 
         self.z = np.zeros(np.shape(self.biases))
 
+        self.error = np.zeros(np.shape(self.biases))
+
     def output(self, layer_input):
         z_temp = np.matmul(self.weights, layer_input) + np.self.biases
         self.z = z_temp
 
         return z_temp, sig(z_temp)
 
-    def error(self, next_layer_error, next_layer_weights):
-        return np.multiply(np.matmul(next_layer_weights.T, next_layer_error), d_sig(self.z))      
+    # sets self.error, given the error and weights from the next layer
+    def err(self, next_layer_error, next_layer_weights):
+        e = np.multiply(np.matmul(next_layer_weights.T, next_layer_error), d_sig(self.z)) 
+        self.error = e
+
+        return e
 
 class Softmax_layer(Layer):
     def __init__(self, size, prev_layer_size):
@@ -119,7 +125,10 @@ class Softmax_layer(Layer):
     #
     # "guess" and "answer" should both be column vectors.
     def final_error(self, guess, answer):
-        return guess - answer
+
+        e = guess - answer
+        self.error = e
+        return e
 
 class Filter(object):
     def __init__(self, width, height):
@@ -134,7 +143,7 @@ class Filter(object):
         self.weight_sum = np.zeros(np.shape(self.weights))
         self.bias_sum = np.zeros(np.shape(self.bias))
 
-class ConvolutionalLayer(Layer):
+class ConvolutionalLayer(object):
     def __init__(self, filters, pooling_filter):
         '''
         "filters" is an array of filter object that define individual feature maps, "pooling_filter" is a filter that is used as part of the built-in
@@ -148,6 +157,17 @@ class ConvolutionalLayer(Layer):
         #vector of grids, one for each feature map. This is populated in the next loop, when we have easier access to the filter shapes.
         self.grids = []
         self.pooled_grids = []
+
+        # When we pool the data in the layer, we need to keep track of the index of the maximum value at each step of the pooling filter. 
+        # This is an array of matrices, one for each filter map. Each matrix is the same size as the output of the pooling layer, and each element
+        # is an ordered pair that gives the coordinates (in terms of the pre-pooled layer) of the largest value. 
+        self.max_vals = []
+
+        # array of error vectors - one vector for each feature map. The weights and error are included as part of the filter.
+        self.error = []
+        for f in filters:
+            self.error.append(np.zeros(np.shape(f)))
+
 
     # This is the output that would be fed into a pooling layer. Since I have combined the convolutional layer and the pooling layer, 
     # this function is not the final output of the layer. 
@@ -191,18 +211,25 @@ class ConvolutionalLayer(Layer):
             pooled_height = int(np.shape(g)[1]/pooling_filter_height)
 
             self.pooled_grids.append(np.zeros((pooled_width, pooled_height)))
+            self.max_vals.append(np.zeros(pooled_width,pooled_height))
+
 
             for j in range(pooled_width):
                 for k in range(pooled_height):
 
                     # Take the largest value in region selected by filter
-                    self.pooled_grids[n][j][k] = np.amax(g[j*pooling_filter_height:(j+1)*pooling_filter_height, k*pooling_filter_width:(k+1)*pooling_filter_width])
-       
-        return self.pooled_grids    
+                    m = g[j*pooling_filter_height:(j+1)*pooling_filter_height, k*pooling_filter_width:(k+1)*pooling_filter_width]
+                    self.pooled_grids[n][j][k] = np.amax(m)
+                    
+                    # index of largest value, using indices of the matrix that we apply the pooling filter to
+                    a,b = np.unravel_index(m.argmax(), m.shape)
+                    self.max_vals[n][j][k] = (a,b)
+
+        return self.pooled_grids, self.max_vals    
 
     # Gives the error for a particular layer in terms of the error in the next layer in the network.
     # See derivation at https://www.jefkine.com/general/2016/09/05/backpropagation-in-convolutional-neural-networks/
-    def error(self, next_layer_error, next_layer_weights):
+    def err(self, next_layer_error, next_layer_weights):
         for n,f in enumerate(self.filters):
             error_vec = []
             error_vec.append(np.zeros(np.shape(f)))
@@ -297,7 +324,9 @@ class Network(object):
             next_layer = self.layers[l+1]
             prev_layer = self.layers[l-1]
             
-            layer.error = np.multiply(np.matmul(next_layer.weights.T,next_layer.error),d_sig(layer.z))              
+            err = layer.error(next_layer.error, next_layer.weights)
+
+            layer.error = np.multiply(np.matmul(next_layer.weights.T,next_layer.error), d_sig(layer.z))              
             layer.bias_sum = layer.bias_sum + layer.error
             layer.weight_sum = layer.weight_sum + np.matmul(layer.error, prev_layer.activation.T)
 
