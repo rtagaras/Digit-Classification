@@ -68,19 +68,32 @@ class Node(object):
 class Layer(object):
     def __init__(self, size, layer_input):
         self.size = size
-        self.prev_layer_size = np.shape(layer_input)
+        self.prev_layer_size = len(layer_input)
         self.nodes = np.array([Node(self.prev_layer_size) for i in range(size)])
-        
+        self.layer_input = layer_input
         # Square matrix of weights. Each row contains all connections going into a single node. Rows are used instead
         # of columns so that we can write the output of a node in matrix form as output=sig(WA+B), where W is the matrix defined here, 
         # A is the column vector of values given by the previous layer, and B is the column vector of biases of the previous layer.
         # Note that the first layer and layers 2,...,N are all from the same class, so there will be weights going "in" to the first layer,
         # but nothing is ever calculated with these. 
-        self.weights = np.concatenate([n.input_weights for n in self.nodes],axis=1).T
+        #self.weights = np.concatenate([n.input_weights for n in self.nodes],axis=1).T
+
+        self.weights = np.array([[1., 0.25,	0.111111,	0.0625],
+                        [0.04,	0.0277778,	0.0204082,	0.015625],
+                        [0.0123457,	0.01,	0.00826446,	0.00694444],
+                        [0.00591716,	0.00510204,	0.00444444,	0.00390625],
+                        [0.00346021,	0.00308642,	0.00277008,	0.0025],
+                        [0.00226757,	0.00206612,	0.00189036,	0.00173611],
+                        [0.0016,	0.00147929,	0.00137174,	0.00127551],
+                        [0.00118906,	0.00111111,	0.00104058,	0.000976563],
+                        [0.000918274,	0.000865052,	0.000816327,	0.000771605],
+                        [0.00073046,	0.000692521,	0.000657462,	0.000625]])
 
         # Column vector of biases corresponding to each node in the layer
-        self.biases = np.array([n.bias for n in self.nodes])
+        #self.biases = np.array([n.bias for n in self.nodes])
     
+        self.biases = np.ones((10,1))
+
         # Running sum that holds the change to be applied to the bias vector after each minibatch
         self.bias_sum = np.zeros(self.biases.shape)
 
@@ -92,11 +105,17 @@ class Layer(object):
 
         self.error = np.zeros(np.shape(self.biases))
 
-    def output(self, layer_input):
-        z_temp = np.matmul(self.weights, layer_input) + np.self.biases
-        self.z = z_temp
+    def output(self):
 
-        return z_temp, sig(z_temp)
+        # These are the wrong size. First is (10,1) and Second is (1,2,2). What??
+        print("first = ", np.shape(self.weights), '\n', "second = ", np.shape(self.layer_input))
+        #print("first = ", np.shape(np.matmul(self.weights, self.layer_input)), '\n', "second = ", np.shape(self.biases))
+
+        #z_temp = np.matmul(self.weights, self.layer_input) + self.biases
+        #self.z = z_temp
+
+
+        #return z_temp, sig(z_temp)
 
     # sets self.error, given the error and weights from the next layer
     def err(self, next_layer_error, next_layer_weights):
@@ -106,11 +125,42 @@ class Layer(object):
         return e
 
 class Softmax_layer(Layer):
-    def __init__(self, size, prev_layer_size):
-        super().__init__(size, prev_layer_size)
+    def __init__(self, size, layer_input):
+        #super().__init__(size, layer_input)
 
-    def output(self, layer_input):
-        m = np.matmul(self.weights, layer_input)
+        self.size = size
+        self.prev_layer_size = len(layer_input)
+        self.nodes = np.array([Node(self.prev_layer_size) for i in range(size)])
+        self.layer_input = layer_input
+        # Square matrix of weights. Each row contains all connections going into a single node. Rows are used instead
+        # of columns so that we can write the output of a node in matrix form as output=sig(WA+B), where W is the matrix defined here, 
+        # A is the column vector of values given by the previous layer, and B is the column vector of biases of the previous layer.
+        # Note that the first layer and layers 2,...,N are all from the same class, so there will be weights going "in" to the first layer,
+        # but nothing is ever calculated with these. 
+        #self.weights = np.concatenate([n.input_weights for n in self.nodes],axis=1).T
+
+        m = np.arange(1,101)
+        m = np.reshape(m,(10,10))
+        self.weights = m
+        # Column vector of biases corresponding to each node in the layer
+        #self.biases = np.array([n.bias for n in self.nodes])
+    
+        self.biases = np.ones((10,1))
+
+        # Running sum that holds the change to be applied to the bias vector after each minibatch
+        self.bias_sum = np.zeros(self.biases.shape)
+
+        # Running sum that holds change in weight matrix
+        self.weight_sum = np.zeros(self.weights.shape)
+
+        # Sometimes, we need to reuse a previously calculated value of z, so I store it here. 
+        self.z = np.zeros(np.shape(self.biases))
+
+        self.error = np.zeros(np.shape(self.biases))
+
+
+    def output(self):
+        m = np.matmul(self.weights, self.layer_input)
         self.z = m.reshape(-1,1) + self.biases
 
         s=0
@@ -134,23 +184,23 @@ class Filter(object):
     def __init__(self, width, height):
         self.width = width
         self.height = height
-        self.weights = np.random.randn(width, height)
-        self.bias = np.random.randn()
+        #self.weights = np.random.randn(width, height)
+        #self.bias = np.random.randn()
 
-        #self.weights = np.array([[1,2],[3,4]])
-        #self.bias = 1
+        self.weights = np.array([[1,2],[3,4]])
+        self.bias = 1
 
         self.weight_sum = np.zeros(np.shape(self.weights))
         self.bias_sum = np.zeros(np.shape(self.bias))
 
 class ConvolutionalLayer(object):
-    def __init__(self, filters, pooling_filter):
+    def __init__(self, filters, pooling_filter, layer_input):
         '''
         "filters" is an array of filter object that define individual feature maps, "pooling_filter" is a filter that is used as part of the built-in
         pooling function. layer_input" is a rectangular numpy array of nodes. 
         '''
         
-        self.layer_input = []
+        self.layer_input = layer_input
         self.filters = filters
         self.pooling_filter = pooling_filter
         
@@ -211,7 +261,7 @@ class ConvolutionalLayer(object):
             pooled_height = int(np.shape(g)[1]/pooling_filter_height)
 
             self.pooled_grids.append(np.zeros((pooled_width, pooled_height)))
-            self.max_vals.append(np.zeros(pooled_width,pooled_height))
+            self.max_vals.append(np.zeros((pooled_width, pooled_height)))
 
 
             for j in range(pooled_width):
@@ -222,8 +272,11 @@ class ConvolutionalLayer(object):
                     self.pooled_grids[n][j][k] = np.amax(m)
                     
                     # index of largest value, using indices of the matrix that we apply the pooling filter to
-                    a,b = np.unravel_index(m.argmax(), m.shape)
-                    self.max_vals[n][j][k] = (a,b)
+                    # a,b = np.unravel_index(m.argmax(), m.shape)
+                    #self.max_vals[n][j][k] = [a,b]
+
+                    # Don't forget that this needs to be unravelled later. 
+                    self.max_vals[n][j][k] = m.argmax()
 
         return self.pooled_grids, self.max_vals    
 
@@ -363,10 +416,16 @@ class Network(object):
 #net.train(training_data, 30, 10, 3.0, test_data=test_data)
 
 #5x5
-# test_img = np.array([[1,2,3,4,5],[6,7,8,9,10],[11,12,13,14,15],[16,17,18,19,20],[21,22,23,24,25]])
+test_img = np.array([[1,2,3,4,5],[6,7,8,9,10],[11,12,13,14,15],[16,17,18,19,20],[21,22,23,24,25]])
 #test_img = np.array([[1,2,3],[4,5,6],[7,8,9]])
-# f = [Filter(2,2)]
-# pf = Filter(2,2)
+f = [Filter(2,2)]
+pf = Filter(2,2)
+
+
+l_c = ConvolutionalLayer(f, pf, test_img)
+l_fc = Layer(10, l_c.output()[0])
+l_s = Softmax_layer(10, l_fc.output()[0])
+net = Network([l_c, l_fc, l_s])
 
 
 # l = ConvolutionalLayer(f,pf)
