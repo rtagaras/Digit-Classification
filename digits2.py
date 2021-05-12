@@ -78,16 +78,16 @@ class Layer(object):
         # but nothing is ever calculated with these. 
         #self.weights = np.concatenate([n.input_weights for n in self.nodes],axis=1).T
 
-        self.weights = np.array([[1., 0.25,	0.111111,	0.0625],
-                        [0.04,	0.0277778,	0.0204082,	0.015625],
-                        [0.0123457,	0.01,	0.00826446,	0.00694444],
-                        [0.00591716,	0.00510204,	0.00444444,	0.00390625],
-                        [0.00346021,	0.00308642,	0.00277008,	0.0025],
-                        [0.00226757,	0.00206612,	0.00189036,	0.00173611],
-                        [0.0016,	0.00147929,	0.00137174,	0.00127551],
-                        [0.00118906,	0.00111111,	0.00104058,	0.000976563],
-                        [0.000918274,	0.000865052,	0.000816327,	0.000771605],
-                        [0.00073046,	0.000692521,	0.000657462,	0.000625]])
+        self.weights = np.array([[1.,	0.03125,	0.00411523,	0.000976563],
+                        [0.00032,	0.000128601,	0.000059499,	0.0000305176],
+                        [0.0000169351,	0.00001,	6.20921E-6,	4.01878E-6],
+                        [2.69329E-6,	1.85934E-6,	1.31687E-6,	9.53674E-7],
+                        [7.04296E-7,	5.29221E-7,	4.03861E-7,	3.125E-7],
+                        [2.44852E-7,	1.94038E-7,	1.55368E-7,	1.25587E-7],
+                        [1.024E-7,	8.41653E-8,	6.96917E-8,	5.81045E-8],
+                        [4.8754E-8,	4.11523E-8,	3.49294E-8,	2.98023E-8],
+                        [2.55523E-8,	2.20093E-8,	1.90397E-8,	1.65382E-8],
+                        [1.44209E-8,	1.26207E-8,	1.10835E-8,	9.76563E-9]])
 
         # Column vector of biases corresponding to each node in the layer
         #self.biases = np.array([n.bias for n in self.nodes])
@@ -108,14 +108,14 @@ class Layer(object):
     def output(self):
 
         # These are the wrong size. First is (10,1) and Second is (1,2,2). What??
-        print("first = ", np.shape(self.weights), '\n', "second = ", np.shape(self.layer_input))
+        #print("first = ", np.shape(self.weights), '\n', "second = ", np.shape(self.layer_input))
         #print("first = ", np.shape(np.matmul(self.weights, self.layer_input)), '\n', "second = ", np.shape(self.biases))
 
-        #z_temp = np.matmul(self.weights, self.layer_input) + self.biases
-        #self.z = z_temp
+        z_temp = np.matmul(self.weights, self.layer_input) + self.biases
+        self.z = z_temp
 
 
-        #return z_temp, sig(z_temp)
+        return z_temp, sig(z_temp)
 
     # sets self.error, given the error and weights from the next layer
     def err(self, next_layer_error, next_layer_weights):
@@ -163,11 +163,8 @@ class Softmax_layer(Layer):
         m = np.matmul(self.weights, self.layer_input)
         self.z = m.reshape(-1,1) + self.biases
 
-        s=0
-        for x in self.z:
-            s += np.exp(x)
-
-        return np.exp(self.z)/s 
+        exp = np.exp(self.z - np.max(self.z))
+        return exp / np.sum(exp)
 
     # This gives the error in the final layer, if this layer type is used as the last layer in the network.
     # Note that the mathematical expression can be different for different layer types. 
@@ -243,6 +240,9 @@ class ConvolutionalLayer(object):
                             s += f.weights[l][m]*layer_input[j+l][k+m]
                     
                     self.grids[n][j][k] = relu(f.bias+s)
+        
+        # for g in self.grids:
+        #     print(g)
 
         return self.grids
 
@@ -278,6 +278,9 @@ class ConvolutionalLayer(object):
                     # Don't forget that this needs to be unravelled later. 
                     self.max_vals[n][j][k] = m.argmax()
 
+        # for g in self.pooled_grids:
+        #     print(g)
+
         return self.pooled_grids, self.max_vals    
 
     # Gives the error for a particular layer in terms of the error in the next layer in the network.
@@ -290,6 +293,8 @@ class ConvolutionalLayer(object):
 
             for x in range(f.width):
                 for y in range(f.height):
+                    
+                    # Is this line broken?
                     s += next_layer_error[x-n][y-m] * next_layer_weights[x][y] * d_relu(self.pre_output(self.layer_input))
 
             error_vec[n][x][y] = s
@@ -423,9 +428,15 @@ pf = Filter(2,2)
 
 
 l_c = ConvolutionalLayer(f, pf, test_img)
-l_fc = Layer(10, l_c.output()[0])
-l_s = Softmax_layer(10, l_fc.output()[0])
-net = Network([l_c, l_fc, l_s])
+print(l_c.pre_output(test_img)[0])
+print(np.reshape(l_c.output()[0][0], (-1, 1)))
+
+l_fc = Layer(10, np.reshape(l_c.output()[0][0], (-1, 1)))
+print(l_fc.output())
+
+l_s = Softmax_layer(10, l_fc.output()[1])
+print(l_s.output())
+#net = Network([l_c, l_fc, l_s])
 
 
 # l = ConvolutionalLayer(f,pf)
