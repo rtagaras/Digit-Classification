@@ -66,11 +66,13 @@ class Node(object):
         self.input_weights = np.random.randn(number_of_inputs,1)
 
 class Layer(object):
-    def __init__(self, size, layer_input):
+    def __init__(self, size, prev_layer_size):
+
+        # size is an int that gives the number of nodes in the layer
         self.size = size
-        self.prev_layer_size = len(layer_input)
+        self.prev_layer_size = prev_layer_size
         self.nodes = np.array([Node(self.prev_layer_size) for i in range(size)])
-        self.layer_input = layer_input
+        self.layer_input = 0
         # Square matrix of weights. Each row contains all connections going into a single node. Rows are used instead
         # of columns so that we can write the output of a node in matrix form as output=sig(WA+B), where W is the matrix defined here, 
         # A is the column vector of values given by the previous layer, and B is the column vector of biases of the previous layer.
@@ -107,15 +109,13 @@ class Layer(object):
 
     def output(self):
 
-        # These are the wrong size. First is (10,1) and Second is (1,2,2). What??
-        #print("first = ", np.shape(self.weights), '\n', "second = ", np.shape(self.layer_input))
-        #print("first = ", np.shape(np.matmul(self.weights, self.layer_input)), '\n', "second = ", np.shape(self.biases))
-
-        z_temp = np.matmul(self.weights, self.layer_input) + self.biases
+        # reshape the rectangular matrix input into a column vector
+        self.layer_input[0] = np.reshape(self.layer_input[0], (-1,1))
+       
+        z_temp = np.matmul(self.weights, self.layer_input[0]) + self.biases
         self.z = z_temp
 
-
-        return z_temp, sig(z_temp)
+        return sig(z_temp)
 
     # sets self.error, given the error and weights from the next layer
     def err(self, next_layer_error, next_layer_weights):
@@ -125,13 +125,14 @@ class Layer(object):
         return e
 
 class Softmax_layer(Layer):
-    def __init__(self, size, layer_input):
+    def __init__(self, size, prev_layer_size):
         #super().__init__(size, layer_input)
 
+        # size is an int that gives the number of nodes in the layer
         self.size = size
-        self.prev_layer_size = len(layer_input)
+        self.prev_layer_size = prev_layer_size
         self.nodes = np.array([Node(self.prev_layer_size) for i in range(size)])
-        self.layer_input = layer_input
+        self.layer_input = 0
         # Square matrix of weights. Each row contains all connections going into a single node. Rows are used instead
         # of columns so that we can write the output of a node in matrix form as output=sig(WA+B), where W is the matrix defined here, 
         # A is the column vector of values given by the previous layer, and B is the column vector of biases of the previous layer.
@@ -145,7 +146,7 @@ class Softmax_layer(Layer):
         # Column vector of biases corresponding to each node in the layer
         #self.biases = np.array([n.bias for n in self.nodes])
     
-        self.biases = np.ones((10,1))
+        self.biases = np.reshape(np.array([-41,-117,-193,-269,-345,-421,-497,-573,-649,-725]), (-1,1))
 
         # Running sum that holds the change to be applied to the bias vector after each minibatch
         self.bias_sum = np.zeros(self.biases.shape)
@@ -191,13 +192,13 @@ class Filter(object):
         self.bias_sum = np.zeros(np.shape(self.bias))
 
 class ConvolutionalLayer(object):
-    def __init__(self, filters, pooling_filter, layer_input):
+    def __init__(self, filters, pooling_filter):
         '''
         "filters" is an array of filter object that define individual feature maps, "pooling_filter" is a filter that is used as part of the built-in
         pooling function. layer_input" is a rectangular numpy array of nodes. 
         '''
         
-        self.layer_input = layer_input
+        self.layer_input = 0
         self.filters = filters
         self.pooling_filter = pooling_filter
         
@@ -218,7 +219,7 @@ class ConvolutionalLayer(object):
 
     # This is the output that would be fed into a pooling layer. Since I have combined the convolutional layer and the pooling layer, 
     # this function is not the final output of the layer. 
-    def pre_output(self, layer_input):
+    def pre_output(self):
         for n,f in enumerate(self.filters):
             filter_width = f.width
             filter_height = f.height
@@ -226,23 +227,19 @@ class ConvolutionalLayer(object):
             # The new layer is a grid of nodes. The size of the layer is determined by the size of the input, the filter, and the stride length.
             # For example, if we have a 28x28 input and a 5x5 filter moved with stride length 1, we are left with a 24x24 layer, since we can 
             # only move the filter 23 units in each direction before reaching the edge of the input. Here, we only use stride length 1. 
-            width = np.shape(layer_input)[0]-filter_width+1
-            height = np.shape(layer_input)[1]-filter_height+1
+            width = np.shape(self.layer_input[0])[0]-filter_width+1
+            height = np.shape(self.layer_input[0])[1]-filter_height+1
 
             self.grids.append(np.zeros((width, height)))
             for j in range(width):
                 for k in range(height):
                     
                     s=0
-
                     for l in range(filter_width):
                         for m in range(filter_height):
-                            s += f.weights[l][m]*layer_input[j+l][k+m]
+                            s += f.weights[l][m]* self.layer_input[0][j+l][k+m]
                     
                     self.grids[n][j][k] = relu(f.bias+s)
-        
-        # for g in self.grids:
-        #     print(g)
 
         return self.grids
 
@@ -250,7 +247,8 @@ class ConvolutionalLayer(object):
     # in the convolutional layer class, using the unpooled output provided by the output function. 
     def output(self):
 
-        standard_output = self.pre_output(self.layer_input)
+        #standard_output = self.pre_output(self.layer_input)
+        standard_output = self.pre_output()
 
         pooling_filter_width = self.pooling_filter.width 
         pooling_filter_height = self.pooling_filter.height
@@ -281,7 +279,7 @@ class ConvolutionalLayer(object):
         # for g in self.pooled_grids:
         #     print(g)
 
-        return self.pooled_grids, self.max_vals    
+        return self.pooled_grids  
 
     # Gives the error for a particular layer in terms of the error in the next layer in the network.
     # See derivation at https://www.jefkine.com/general/2016/09/05/backpropagation-in-convolutional-neural-networks/
@@ -365,14 +363,16 @@ class Network(object):
             # Set input layer
             self.layers[0].layer_input = data
             
+            print(data[0])
             # Iterate over layers after the input
             for k in range(1,len(self.layers)):
                 layer = self.layers[k]
                 prev_layer = self.layers[k-1]
 
-                layer.layer_input = prev_layer.output(prev_layer.layer_input)
-            
-            return (layer.output(layer.layer_input), layer.z)
+                # layer.layer_input = prev_layer.output(prev_layer.layer_input)
+                layer.layer_input = prev_layer.output()
+                #print(layer.output()[0])
+            return (layer.output(), layer.z)
 
     # correct this too
     def backwards_pass(self, last_layer_error):
@@ -421,25 +421,36 @@ class Network(object):
 #net.train(training_data, 30, 10, 3.0, test_data=test_data)
 
 #5x5
-test_img = np.array([[1,2,3,4,5],[6,7,8,9,10],[11,12,13,14,15],[16,17,18,19,20],[21,22,23,24,25]])
-#test_img = np.array([[1,2,3],[4,5,6],[7,8,9]])
+training_data = (np.array([[1,2,3,4,5],[6,7,8,9,10],[11,12,13,14,15],[16,17,18,19,20],[21,22,23,24,25]]), np.reshape(np.array([1,0,0,0,0,0,0,0,0,0]), (-1,1)))
+
 f = [Filter(2,2)]
 pf = Filter(2,2)
+l_c = ConvolutionalLayer(f, pf)
+# print(l_c.pre_output(test_img)[0])
+# print(np.reshape(l_c.output()[0][0], (-1, 1)))
+
+l_fc = Layer(10, 4)
+# print(l_fc.output())
+
+l_s = Softmax_layer(10, 10)
+# print(l_s.output())
+net = Network([l_c, l_fc, l_s])
 
 
-l_c = ConvolutionalLayer(f, pf, test_img)
-print(l_c.pre_output(test_img)[0])
-print(np.reshape(l_c.output()[0][0], (-1, 1)))
+#print(training_data[0])
+# l_c.layer_input = training_data
 
-l_fc = Layer(10, np.reshape(l_c.output()[0][0], (-1, 1)))
-print(l_fc.output())
+print(net.forward_pass(training_data))
+# #print(training_data)
 
-l_s = Softmax_layer(10, l_fc.output()[1])
-print(l_s.output())
-#net = Network([l_c, l_fc, l_s])
+# lco = l_c.output()
+# print(lco)
 
+# l_fc.layer_input = lco
+# lfco = l_fc.output()
+# print(lfco)
 
-# l = ConvolutionalLayer(f,pf)
-# l.layer_input = test_img
-# out = l.output()
-# print(out)
+# l_s.layer_input = lfco
+# lso = l_s.output()
+# print(lso)
+
