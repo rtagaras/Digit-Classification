@@ -17,7 +17,7 @@ def relu(x):
 
 # Derivative of relu
 def d_relu(x):
-    if x<= 0:
+    if x <= 0:
         return 0
 
     else:
@@ -216,6 +216,29 @@ class ConvolutionalLayer(object):
         for f in filters:
             self.error.append(np.zeros(np.shape(f)))
 
+        # This is an array of matrices. Each matrix holds the error associated with each site in the convolutional layer.
+        # Most values here will be zero, except for the ones that correspond to the largest value in each pooling region. 
+        self.error_mats = []
+
+    # given a matrix with the single-valued index for the location of the greatest value in each submatrix of the convolutional layer,
+    # return the coordinates of each greatest value, in terms of the coordinates of the convolutional layer. 
+    # sub_matrix_shape should be (rows, columns)
+    def full_indices(self, matrix):
+        x = np.shape(matrix)[0]
+        y = np.shape(matrix)[1]
+
+        m = np.empty((x,y), dtype = tuple)
+
+        for i in range(x):
+            for j in range(y):
+
+                # x and y indices within each submatrix
+                ux = np.unravel_index(matrix[i][j], (y,x))[0]
+                uy = np.unravel_index(matrix[i][j], (y,x))[1]
+                
+                m[i][j] = (ux + y*i, uy + x*j)
+
+        return m
 
     # This is the output that would be fed into a pooling layer. Since I have combined the convolutional layer and the pooling layer, 
     # this function is not the final output of the layer. 
@@ -258,8 +281,8 @@ class ConvolutionalLayer(object):
             pooled_width = int(np.shape(g)[0]/pooling_filter_width)
             pooled_height = int(np.shape(g)[1]/pooling_filter_height)
 
-            self.pooled_grids.append(np.zeros((pooled_width, pooled_height)))
-            self.max_vals.append(np.zeros((pooled_width, pooled_height)))
+            self.pooled_grids.append(np.empty((pooled_width, pooled_height)))
+            self.max_vals.append(np.empty((pooled_width, pooled_height), dtype=int))
 
 
             for j in range(pooled_width):
@@ -275,29 +298,45 @@ class ConvolutionalLayer(object):
 
                     # Don't forget that this needs to be unravelled later. 
                     self.max_vals[n][j][k] = m.argmax()
+                    #print(np.unravel_index(m.argmax(), (2,2)))
 
         # for g in self.pooled_grids:
         #     print(g)
-
         return self.pooled_grids  
 
-    # Gives the error for a particular layer in terms of the error in the next layer in the network.
+    # Gives the gradient of the cost for a particular layer in terms of the error in the next layer in the network.
     # See derivation at https://www.jefkine.com/general/2016/09/05/backpropagation-in-convolutional-neural-networks/
-    def err(self, next_layer_error, next_layer_weights):
-        for n,f in enumerate(self.filters):
-            error_vec = []
-            error_vec.append(np.zeros(np.shape(f)))
-            s = 0
+    # def dC_dw(self, next_layer_error, next_layer_weights):
+    #     for n,f in enumerate(self.filters):
+    #         error_vec = []
+    #         error_vec.append(np.zeros(np.shape(f)))
+    #         s = 0
 
-            for x in range(f.width):
-                for y in range(f.height):
+    #         for x in range(f.width):
+    #             for y in range(f.height):
                     
-                    # Is this line broken?
-                    s += next_layer_error[x-n][y-m] * next_layer_weights[x][y] * d_relu(self.pre_output(self.layer_input))
+    #                 # Is this line broken?
+    #                 s += next_layer_error[x-n][y-m] * next_layer_weights[x][y] * d_relu(self.pre_output(self.layer_input))
 
-            error_vec[n][x][y] = s
+    #         error_vec[n][x][y] = s
         
-        return error_vec
+    #     return error_vec
+
+    # takes in the error coming from a pooling layer and creates the matrix that distributes this error to the highest-valued sites. 
+    # All other sites get zero error. 
+    #
+    # TODO: I need to get the error from the pooling layer into here. 
+    def err(self, pooling_error):
+        m = np.reshape(self.full_indices(self.max_vals), (-1,1))
+
+        self.error_mats.append(np.zeros(np.shape(self.layer_input)))
+
+        for i in m:
+            x = i[0]
+            y = i[1]
+            self.error_mats[-1][x][y] = 
+
+        
 
 class Network(object):
     def __init__(self,layers):
@@ -311,14 +350,9 @@ class Network(object):
         self.test_outputs = []
 
     def cost(self, x, lam, weights, n):
-        
+        # weights must include all weights in the network.
         # We use L2 regularization to help with overfitting.
-        s = 0
-        for i in range(np.shape(weights)[0]):
-            for j in range(np.shape(weights)[1]):
-                s += (weights[i][j])**2
-        
-        return -np.log(x) + lam*s/(2.0*n)
+        return -np.log(x)+np.square(weights).sum()/(2.0*n)
 
     def train(self, training_data, epochs, batch_size, rate, test_data):
         
@@ -376,17 +410,22 @@ class Network(object):
 
     # correct this too
     def backwards_pass(self, last_layer_error):
-        # Backwards pass
+
+        self.layers[-1].error = last_layer_error
+
+        # iterate over all layers except for the first and the last. The error in the last layer is already
+        # known, and there is no need to pass error backwards through the first layer. 
         for l in range(len(self.layers)-2,0,-1):
             layer = self.layers[l]
             next_layer = self.layers[l+1]
             prev_layer = self.layers[l-1]
             
-            err = layer.error(next_layer.error, next_layer.weights)
+            layer.error_input = next_layer.error
+            layer.error = layer.error_output()
 
-            layer.error = np.multiply(np.matmul(next_layer.weights.T,next_layer.error), d_sig(layer.z))              
-            layer.bias_sum = layer.bias_sum + layer.error
-            layer.weight_sum = layer.weight_sum + np.matmul(layer.error, prev_layer.activation.T)
+            # layer.error = np.multiply(np.matmul(next_layer.weights.T,next_layer.error), d_sig(layer.z))              
+            # layer.bias_sum = layer.bias_sum + layer.error
+            # layer.weight_sum = layer.weight_sum + np.matmul(layer.error, prev_layer.activation.T)
 
     # this needs to be modified to reflect the changes made to forward_pass
     def backpropagate(self, batch, rate):
@@ -421,7 +460,7 @@ class Network(object):
 #net.train(training_data, 30, 10, 3.0, test_data=test_data)
 
 #5x5
-training_data = (np.array([[1,2,3,4,5],[6,7,8,9,10],[11,12,13,14,15],[16,17,18,19,20],[21,22,23,24,25]]), np.reshape(np.array([1,0,0,0,0,0,0,0,0,0]), (-1,1)))
+training_data = (np.array([[-1,-1/2,-1/3,-1/4,-1/5],[1/6,1/7,1/8,1/9,1/10],[-1/11,-1/12,-1/13,-1/14,-1/15],[1/16,1/17,1/18,1/19,1/20],[-1/21,-1/22,-1/23,-1/24,-1/25]]), np.reshape(np.array([1,0,0,0,0,0,0,0,0,0]), (-1,1)))
 
 f = [Filter(2,2)]
 pf = Filter(2,2)
@@ -441,6 +480,8 @@ net = Network([l_c, l_fc, l_s])
 # l_c.layer_input = training_data
 
 print(net.forward_pass(training_data))
+#print(l_c.max_vals[0])
+print(l_c.full_indices(l_c.max_vals[0]))
 # #print(training_data)
 
 # lco = l_c.output()
