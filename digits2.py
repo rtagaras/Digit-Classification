@@ -16,12 +16,14 @@ def relu(x):
     return max(0,x)
 
 # Derivative of relu
-def d_relu(x):
-    if x <= 0:
-        return 0
+# def d_relu(x):
+#     if x <= 0:
+#         return 0
 
-    else:
-        return 1
+#     else:
+#         return 1
+def d_relu(x):
+    return np.where(x<=0, 0, 1)
 
 # Only used in data loading
 def vectorized_result(j):
@@ -216,13 +218,27 @@ class ConvolutionalLayer(object):
         for f in filters:
             self.error.append(np.zeros(np.shape(f)))
 
+        self.error_input = []
+
         # This is an array of matrices. Each matrix holds the error associated with each site in the convolutional layer.
         # Most values here will be zero, except for the ones that correspond to the largest value in each pooling region. 
         self.error_mats = []
 
+        # This is an array of matrices, one for each feature map. Each matrix holds a running sum of the derivative of the cost function with
+        # respect to the weights of the corresponding filter. This is used in gradient descent.
+        self.weight_gradient_sum = []
+
+        # Similar to above, but for biases instead of weights. 
+        self.bias_gradient_sum = []
+
     # given a matrix with the single-valued index for the location of the greatest value in each submatrix of the convolutional layer,
     # return the coordinates of each greatest value, in terms of the coordinates of the convolutional layer. 
     # sub_matrix_shape should be (rows, columns)
+    
+    # This may not be entirely needed. Since we only have a single convolutional layer, and since the full error matrix coming from the pooling
+    # layer will be zero except at the locations of the max values, we only need the max values themselves when doing calculations. 
+    # If we take the time to reconstruct the entire matrix, all we end up with are a bunch of terms that get multiplied by zero anyway. 
+    # It may be enough to just stick with the 2x2 matrix that we had previously. 
     def full_indices(self, matrix):
         x = np.shape(matrix)[0]
         y = np.shape(matrix)[1]
@@ -270,13 +286,10 @@ class ConvolutionalLayer(object):
     # in the convolutional layer class, using the unpooled output provided by the output function. 
     def output(self):
 
-        #standard_output = self.pre_output(self.layer_input)
         standard_output = self.pre_output()
-
         pooling_filter_width = self.pooling_filter.width 
         pooling_filter_height = self.pooling_filter.height
 
-       
         for n, g in enumerate(standard_output):
             pooled_width = int(np.shape(g)[0]/pooling_filter_width)
             pooled_height = int(np.shape(g)[1]/pooling_filter_height)
@@ -292,52 +305,35 @@ class ConvolutionalLayer(object):
                     m = g[j*pooling_filter_height:(j+1)*pooling_filter_height, k*pooling_filter_width:(k+1)*pooling_filter_width]
                     self.pooled_grids[n][j][k] = np.amax(m)
                     
-                    # index of largest value, using indices of the matrix that we apply the pooling filter to
-                    # a,b = np.unravel_index(m.argmax(), m.shape)
-                    #self.max_vals[n][j][k] = [a,b]
-
                     # Don't forget that this needs to be unravelled later. 
                     self.max_vals[n][j][k] = m.argmax()
-                    #print(np.unravel_index(m.argmax(), (2,2)))
 
-        # for g in self.pooled_grids:
-        #     print(g)
         return self.pooled_grids  
 
-    # Gives the gradient of the cost for a particular layer in terms of the error in the next layer in the network.
-    # See derivation at https://www.jefkine.com/general/2016/09/05/backpropagation-in-convolutional-neural-networks/
-    # def dC_dw(self, next_layer_error, next_layer_weights):
-    #     for n,f in enumerate(self.filters):
-    #         error_vec = []
-    #         error_vec.append(np.zeros(np.shape(f)))
-    #         s = 0
+    # Given an error matrix from the next layer, this returns the error in the each of the convolution kernels. 
+    def error_output(self, error_in):
+        for g,f in enumerate(self.filters):
+            self.error_mats.append(np.zeros((f.width, f.height)))
 
-    #         for x in range(f.width):
-    #             for y in range(f.height):
-                    
-    #                 # Is this line broken?
-    #                 s += next_layer_error[x-n][y-m] * next_layer_weights[x][y] * d_relu(self.pre_output(self.layer_input))
+            for i in range(f.width):
+                for j in range(f.height):
+                    temp = 0
 
-    #         error_vec[n][x][y] = s
+                    for n in range(f.width):
+                        for m in range(f.height):
+                            
+                            # i,j have been replaced with i+1,j+1. I think this fixes the weird behavior I was getting, and now the answers match the
+                            # Mathematica calculation. However, I'm not totally sure, and the index conventions of the article aren't consistent, so 
+                            # I can't understand exactly why I would do this. Using i,j is more sensible, but it completely breaks d_relu(x) in 
+                            # Mathematica, so that makes me think that I'm really getting some sort of unannounced undefined behavior here when I try it.
+                            temp += error_in[i+1+m][j+1+n] * f.weights[m][n] * d_relu(self.grids[g][i][j])
+
+                    self.error_mats[g][i][j] = temp
         
-    #     return error_vec
+            # We need to rotate the final result. This is equivalent to taking the convolution with a flipped kernel.
+            self.error_mats[g] = np.rot90(self.error_mats[g], 2)
 
-    # takes in the error coming from a pooling layer and creates the matrix that distributes this error to the highest-valued sites. 
-    # All other sites get zero error. 
-    #
-    # TODO: I need to get the error from the pooling layer into here. 
-    def err(self, pooling_error):
-        m = np.reshape(self.full_indices(self.max_vals), (-1,1))
-
-        self.error_mats.append(np.zeros(np.shape(self.layer_input)))
-
-        for i in m:
-            x = i[0]
-            y = i[1]
-            self.error_mats[-1][x][y] = 
-
-        
-
+        return self.error_mats
 class Network(object):
     def __init__(self,layers):
         """
@@ -397,15 +393,12 @@ class Network(object):
             # Set input layer
             self.layers[0].layer_input = data
             
-            print(data[0])
             # Iterate over layers after the input
             for k in range(1,len(self.layers)):
                 layer = self.layers[k]
                 prev_layer = self.layers[k-1]
-
-                # layer.layer_input = prev_layer.output(prev_layer.layer_input)
                 layer.layer_input = prev_layer.output()
-                #print(layer.output()[0])
+
             return (layer.output(), layer.z)
 
     # correct this too
@@ -479,9 +472,9 @@ net = Network([l_c, l_fc, l_s])
 #print(training_data[0])
 # l_c.layer_input = training_data
 
-print(net.forward_pass(training_data))
+#print(net.forward_pass(training_data))
 #print(l_c.max_vals[0])
-print(l_c.full_indices(l_c.max_vals[0]))
+#print(l_c.full_indices(l_c.max_vals[0]))
 # #print(training_data)
 
 # lco = l_c.output()
@@ -495,3 +488,6 @@ print(l_c.full_indices(l_c.max_vals[0]))
 # lso = l_s.output()
 # print(lso)
 
+print(net.forward_pass(training_data))
+test_mat = np.array([[0,0,0,0.00190331],[0.0672416,0,0,0],[0.000245293,0,0.0000604456,0],[0,0,0,0]])
+print(l_c.error_output(test_mat))
