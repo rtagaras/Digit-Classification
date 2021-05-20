@@ -120,6 +120,19 @@ class Layer(object):
 
         return e
 
+    def gradients(self):
+        w_shape = np.shape((self.weights))
+        w = np.zeros(w_shape)
+
+        for i in range(w_shape[0]):
+            for j in range(w_shape[1]):
+                w[i][j] = self.error[i] * self.layer_input[j]
+
+        self.weight_sum += w
+        self.bias_sum += self.error
+
+        return w, self.error
+
 class Softmax_layer(Layer):
     def __init__(self, size, prev_layer_size):
         #super().__init__(size, layer_input)
@@ -128,7 +141,7 @@ class Softmax_layer(Layer):
         self.size = size
         self.prev_layer_size = prev_layer_size
         self.nodes = np.array([Node(self.prev_layer_size) for i in range(size)])
-        self.layer_input = 0
+        self.layer_input = []
         # Square matrix of weights. Each row contains all connections going INTO a single node. Rows are used instead
         # of columns so that we can write the output of a node in matrix form as output=sig(WA+B), where W is the matrix defined here, 
         # A is the column vector of values given by the previous layer, and B is the column vector of biases of the previous layer.
@@ -174,6 +187,20 @@ class Softmax_layer(Layer):
         
         return e
 
+    # Returns dC/dW and dC/db as arrays
+    def gradients(self):
+        w_shape = np.shape((self.weights))
+        w = np.zeros(w_shape)
+
+        for i in range(w_shape[0]):
+            for j in range(w_shape[1]):
+                w[i][j] = self.error[i] * self.layer_input[j]
+
+        self.weight_sum += w
+        self.bias_sum += self.error
+
+        return w, self.error
+
 class Filter(object):
     def __init__(self, width, height):
         self.width = width
@@ -198,9 +225,8 @@ class ConvolutionalLayer(object):
         self.filters = filters
         self.pooling_filter = pooling_filter
         
-        # Vectors of grids, one for each feature map. These are populated in the output function, when we have access to the layer input. 
-        # At this point, the layers in the network are all created at the same time, before any calculations are done. Since the output sizes
-        # depend on the size of the input and the shapes of the weights in other layers, I'm not sure how to get around this. 
+        # Vectors of grids, one for each feature map. These are populated in a later function, when we have access to the layer input. 
+        
         self.grids = []
         self.pooled_grids = []
 
@@ -212,32 +238,44 @@ class ConvolutionalLayer(object):
         # array of error vectors - one vector for each feature map. The weights and error are included as part of the filter.
         self.error = []
         self.poolerror = []
+        
+        # This is an array of matrices. Each matrix holds the error associated with each site in the convolutional layer.
+        # Most values here will be zero, except for the ones that correspond to the largest value in each pooling region. 
         self.error_mats = []
-        self.weight_gradient_sum = []
-        self.bias_gradient_sum = []
-        for f in filters:
 
-            # This is an array of matrices. Each matrix holds the error associated with each site in the convolutional layer.
-            # Most values here will be zero, except for the ones that correspond to the largest value in each pooling region. 
+        # This is an array of matrices, one for each feature map. Each matrix holds a running sum of the derivative of the cost function with
+        # respect to the weights of the corresponding filter. This is used in gradient descent.
+        self.weight_gradient_sum = []
+
+        # Similar to above, but for biases instead of weights. 
+        self.bias_gradient_sum = []
+
+    # This populates the arrays above with matrices of zeros. The layers in the network are all created at the same time, before any calculations 
+    # are done, so we can't populate the arrays when the layer is created, because we don't know what size they need to be. The solution is to use this
+    # function, which is called by the network class after the layers are created. We really should have a similar function for each layer type, but 
+    # since I only ever plan to have a convolutional layer first, I'm skipping that.  
+    def populate_arrays(self, first_layer_input):
+        for f in self.filters:
+
             self.error.append(np.zeros(np.shape(f)))
             self.poolerror.append(np.zeros(np.shape(f)))
-
             self.error_mats.append(np.zeros((f.width, f.height)))
-
-            # This is an array of matrices, one for each feature map. Each matrix holds a running sum of the derivative of the cost function with
-            # respect to the weights of the corresponding filter. This is used in gradient descent.
             self.weight_gradient_sum.append(np.zeros(np.shape(f.weights)))
-
-            # Similar to above, but for biases instead of weights. 
             self.bias_gradient_sum.append(np.zeros(np.shape(f.bias)))
 
             # The new layer is a grid of nodes. The size of the layer is determined by the size of the input, the filter, and the stride length.
             # For example, if we have a 28x28 input and a 5x5 filter moved with stride length 1, we are left with a 24x24 layer, since we can 
             # only move the filter 23 units in each direction before reaching the edge of the input. Here, we only use stride length 1. 
-            # width = np.shape(self.layer_input[0])[0]-f.width+1
-            # height = np.shape(self.layer_input[0])[1]-f.height+1
+            width = np.shape(first_layer_input)[0]-f.width+1
+            height = np.shape(first_layer_input)[1]-f.height+1
 
-            # self.grids.append(np.zeros((width, height)))
+            self.grids.append(np.zeros((width, height)))
+
+            # The size of these matrices is determined by the size of the pooling filter and the grid of nodes we defined previously. We split that grid
+            # into equally spaced regions the size of the pooling filter and, iterating across the colvolved image, take the max value in each region. 
+            self.pooled_grids.append(np.zeros((int(width/self.pooling_filter.width), int(height/self.pooling_filter.height))))
+            self.max_vals.append(np.zeros((int(width/self.pooling_filter.width), int(height/self.pooling_filter.height)), dtype=int))
+
     
     # Given a matrix with the single-valued index for the location of the greatest value in each submatrix of the convolutional layer,
     # return the coordinates of each greatest value, in terms of the coordinates of the convolutional layer. 
@@ -289,7 +327,6 @@ class ConvolutionalLayer(object):
             width = np.shape(self.layer_input[0])[0]-filter_width+1
             height = np.shape(self.layer_input[0])[1]-filter_height+1
 
-            self.grids.append(np.zeros((width, height)))
             for j in range(width):
                 for k in range(height):
                     
@@ -311,15 +348,8 @@ class ConvolutionalLayer(object):
         pooling_filter_height = self.pooling_filter.height
 
         for n, g in enumerate(standard_output):
-            #pooling_filter_width = self.pooling_filter.width 
-            #pooling_filter_height = self.pooling_filter.height
-
             pooled_width = int(np.shape(g)[0]/pooling_filter_width)
             pooled_height = int(np.shape(g)[1]/pooling_filter_height)
-
-            self.pooled_grids.append(np.zeros((pooled_width, pooled_height)))
-            self.max_vals.append(np.zeros((pooled_width, pooled_height), dtype=int))
-
 
             for j in range(pooled_width):
                 for k in range(pooled_height):
@@ -363,23 +393,37 @@ class ConvolutionalLayer(object):
 
         return self.error_mats
 
-    # def gradients(self):
-    #     for n,f in enumerate(self.filters):
+    def gradients(self):
+        for k,f in enumerate(self.filters):
 
-    #         temp = 0
-    #         for i in range(height-f.height):
-    #             for j in range(width-f.width)
-    #                 temp += self.error_mats[n][i][j] * 
+            for m in range(f.height):
+                for n in range(f.width):
+                    temp = 0
 
-    #         self.weight_gradient_sum[n] += w
-    
+                    # I think using the dimensions of f here shouldn't cause any issues, but if issues come up, this is a place to look.
+                    for i in range(f.height):
+                        for j in range(f.width):
+
+                            # There's another instance of adding 1 to i,j here. Again, not sure why this should be the case. 
+                            temp += self.error_mats[k][i][j] * self.layer_input[0][i+1+m][j+1+n]
+
+                    self.weight_gradient_sum[k][m][n] += temp
+
+            self.bias_gradient_sum += self.error_mats[k]
+        
+        return self.weight_gradient_sum, self.bias_gradient_sum
+        
 class Network(object):
-    def __init__(self,layers):
+    def __init__(self, layers, first_layer_input):
         """
         "layers" is an array that holds layer objects of various types. The last element should be 10-dimensional, fully-connected layer. 
         """
 
         self.layers = layers
+
+        # This populates various arrays with matrices of zeros. It needs to be done here because some of the matrix sizes depend on information that is
+        # not available to the layer at the time of its creation. 
+        self.layers[0].populate_arrays(first_layer_input)
 
         # Array that stores predicted digit for each input in test data
         self.test_outputs = []
@@ -471,7 +515,8 @@ class Network(object):
         self.update_network(rate, m)
 
     def calculate_gradients(self):
-        pass
+        for l in self.layers:
+            l.gradients()
 
     def update_network(self, rate, batch_size):
         # update weights and biases and reset sums for next batch
@@ -499,12 +544,14 @@ l_c = ConvolutionalLayer(f, pf)
 l_fc = Layer(10, 4)
 l_s = Softmax_layer(10, 10)
 
-net = Network([l_c, l_fc, l_s])
+net = Network([l_c, l_fc, l_s], training_data[0])
+net.train(training_data, 1,1,1)
+# answer = training_data[1]
+# result = net.forward_pass(training_data)[0]
+# layer = net.layers[-1]
 
-answer = training_data[1]
-result = net.forward_pass(training_data)[0]
-layer = net.layers[-1]
+# delta = layer.error_output(result, answer)
 
-delta = layer.error_output(result, answer)
-
-print(net.backwards_pass(delta))
+# d=net.backwards_pass(delta)
+# filter_change = l_c.gradients()
+# print(l_c.weight_gradient_sum)
