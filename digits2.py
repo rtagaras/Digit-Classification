@@ -69,23 +69,13 @@ class Layer(object):
         self.prev_layer_size = prev_layer_size
         self.nodes = np.array([Node(self.prev_layer_size) for i in range(size)])
         self.layer_input = []
+
         # Square matrix of weights. Each row contains all connections going into a single node. Rows are used instead
         # of columns so that we can write the output of a node in matrix form as output=sig(WA+B), where W is the matrix defined here, 
         # A is the column vector of values given by the previous layer, and B is the column vector of biases of the previous layer.
         # Note that the first layer and layers 2,...,N are all from the same class, so there will be weights going "in" to the first layer,
         # but nothing is ever calculated with these. 
         self.weights = np.concatenate([n.input_weights for n in self.nodes],axis=1).T
-
-        # self.weights = np.array([[1.,	0.03125,	0.00411523,	0.000976563],
-        #                 [0.00032,	0.000128601,	0.000059499,	0.0000305176],
-        #                 [0.0000169351,	0.00001,	6.20921E-6,	4.01878E-6],
-        #                 [2.69329E-6,	1.85934E-6,	1.31687E-6,	9.53674E-7],
-        #                 [7.04296E-7,	5.29221E-7,	4.03861E-7,	3.125E-7],
-        #                 [2.44852E-7,	1.94038E-7,	1.55368E-7,	1.25587E-7],
-        #                 [1.024E-7,	8.41653E-8,	6.96917E-8,	5.81045E-8],
-        #                 [4.8754E-8,	4.11523E-8,	3.49294E-8,	2.98023E-8],
-        #                 [2.55523E-8,	2.20093E-8,	1.90397E-8,	1.65382E-8],
-        #                 [1.44209E-8,	1.26207E-8,	1.10835E-8,	9.76563E-9]])
 
         # Column vector of biases corresponding to each node in the layer
         self.biases = np.array([n.bias for n in self.nodes])
@@ -145,13 +135,13 @@ class Layer(object):
 
 class Softmax_layer(Layer):
     def __init__(self, size, prev_layer_size):
-        #super().__init__(size, layer_input)
 
         # size is an int that gives the number of nodes in the layer
         self.size = size
         self.prev_layer_size = prev_layer_size
         self.nodes = np.array([Node(self.prev_layer_size) for i in range(size)])
         self.layer_input = []
+
         # Square matrix of weights. Each row contains all connections going INTO a single node. Rows are used instead
         # of columns so that we can write the output of a node in matrix form as output=sig(WA+B), where W is the matrix defined here, 
         # A is the column vector of values given by the previous layer, and B is the column vector of biases of the previous layer.
@@ -159,14 +149,9 @@ class Softmax_layer(Layer):
         # but nothing is ever calculated with these. 
         self.weights = np.concatenate([n.input_weights for n in self.nodes],axis=1).T
 
-        # m = np.arange(1,101)
-        # m = np.reshape(m,(10,10))
-        # self.weights = m
         # Column vector of biases corresponding to each node in the layer
         self.biases = np.array([n.bias for n in self.nodes])
     
-        #self.biases = np.reshape(np.array([-41,-117,-193,-269,-345,-421,-497,-573,-649,-725]), (-1,1))
-
         # Running sum that holds the change to be applied to the bias vector after each minibatch
         self.bias_sum = np.zeros(self.biases.shape)
 
@@ -227,10 +212,6 @@ class Filter(object):
         self.height = height
         self.weights = np.random.randn(width, height)
         self.bias = np.random.randn()
-
-        #self.weights = np.array([[1,2],[3,4]])
-        #self.bias = 1
-
         self.weight_sum = np.zeros(np.shape(self.weights))
         self.bias_sum = np.zeros(np.shape(self.bias))
 
@@ -307,9 +288,6 @@ class ConvolutionalLayer(object):
         fx = self.pooling_filter.width
         fy = self.pooling_filter.height
 
-        # fx = filter_shape[0]
-        # fy = filter_shape[1]
-
         m = np.empty((x,y), dtype = tuple)
 
         for i in range(x):
@@ -319,7 +297,6 @@ class ConvolutionalLayer(object):
                 ux = np.unravel_index(matrix[i][j], (fx,fy))[0]
                 uy = np.unravel_index(matrix[i][j], (fx,fy))[1]
                 
-                #print(np.unravel_index(matrix[i][j], (2,2)))
                 m[i][j] = (ux + fx*i, uy + fy*j)
 
         return m
@@ -343,7 +320,7 @@ class ConvolutionalLayer(object):
 
     # This is the output that would be fed into a pooling layer. Since I have combined the convolutional layer and the pooling layer, 
     # this function is not the final output of the layer. 
-
+    #
     # I changed all self.layer_input[0] to self.layer_input. This may need to be changed back, although it seems like it fixed the proble.
     def pre_output(self):
         for n,f in enumerate(self.filters):
@@ -364,7 +341,6 @@ class ConvolutionalLayer(object):
                         for m in range(filter_height):
                             s += f.weights[l][m]* self.layer_input[j+l][k+m]
                     
-                    #print(f.bias)
                     self.grids[n][j][k] = relu(f.bias+s)
 
         return self.grids
@@ -398,9 +374,7 @@ class ConvolutionalLayer(object):
 
         for g,f in enumerate(self.filters):
 
-            # e = self.unpool(np.multiply(np.matmul(weights.T, error_in), d_sig(self.pooled_grids[g])), self.max_vals[g], np.shape(l_c.grids[g]))
             e = self.unpool(np.multiply(np.reshape(np.matmul(weights.T, error_in), np.shape(d_sig(self.pooled_grids[g]))), d_sig(self.pooled_grids[g])), self.max_vals[g], np.shape(l_c.grids[g]))
-
             self.poolerror[g] = e
 
             for i in range(f.width):
@@ -424,7 +398,6 @@ class ConvolutionalLayer(object):
 
         return self.error_mats
 
-    # I think bias_sum has the wrong shape here
     def gradients(self):
         for k,f in enumerate(self.filters):
 
@@ -439,7 +412,7 @@ class ConvolutionalLayer(object):
                             # Another change from self.layer_input[0] to self.layer_input
                             temp += self.error_mats[k][i][j] * self.layer_input[i+1+m][j+1+n]
 
-                    self.weight_sum[k][m][n] += temp
+                    self.weight_sum[k][m][n] += temp 
 
             self.bias_sum += np.sum(self.error_mats[k])
 
@@ -447,11 +420,6 @@ class ConvolutionalLayer(object):
 
     def update_parameters(self, rate, batch_size):
         for n,f in enumerate(self.filters):
-
-            # are these the same size as the things they should be added to? That could be causing the issues after the first batch, becuase that's the
-            # first time that this function is called. 
-
-            #print(self.bias_sum[n])
             f.weights -= (rate/batch_size)* self.weight_sum[n]
             f.bias -= (rate/batch_size)* self.bias_sum[n]
 
@@ -475,10 +443,10 @@ class Network(object):
         # Array that stores predicted digit for each input in test data
         self.test_outputs = []
 
-    def cost(self, x, lam, weights, n):
-        # weights must include all weights in the network.
-        # We use L2 regularization to help with overfitting.
-        return -np.log(x)+np.square(weights).sum()/(2.0*n)
+    # def cost(self, x, lam, weights, n):
+    #     # weights must include all weights in the network.
+    #     # We use L2 regularization to help with overfitting.
+    #     return -np.log(x)+np.square(weights).sum()/(2.0*n)
 
     def train(self, training_data, epochs, batch_size, rate, test_data=None, validation_data=None):
         
@@ -493,7 +461,6 @@ class Network(object):
         
         # Data is list of tuples (x,y), where x is a 28x28-dimensional numpy array that holds the input image and y is a 10-dimensional
         # numpy array that indicates the correct number that corresponds to the image. 
-        #training_data = list(training_data)
         n_train = len(training_data)
 
         # Repeatedly train on shuffled dataset 
@@ -503,12 +470,12 @@ class Network(object):
             self.test_outputs = []
 
             # Randomly shuffle training data and partition into subsets for batch training
-            #random.shuffle(training_data)
+            random.shuffle(training_data)
             batches = [training_data[j:j+batch_size] for j in range(0, n_train, batch_size)]
             
-            for batch in batches:
-            #for n,batch in enumerate(batches):
-                #print("Batch ", n+1, '/', len(batches))
+            #for batch in batches:
+            for n,batch in enumerate(batches):
+                print("Batch ", n+1, '/', len(batches))
                 self.backpropagate(batch, rate)
                 
             # Do another forward pass to get the outputs for test data
@@ -533,9 +500,9 @@ class Network(object):
                 prev_layer = self.layers[k-1]
                 layer.layer_input = prev_layer.output()
 
-            #return (layer.output(), layer.z)
             return layer.output()
 
+    # used to pass output error backwards through the network
     def backwards_pass(self, last_layer_error):
 
         self.layers[-1].error = last_layer_error
@@ -552,38 +519,34 @@ class Network(object):
     def backpropagate(self, batch, rate):
         m = len(batch)
         
-        for drawing, answer in batch:                    
-            result = self.forward_pass(drawing)
+        for image, answer in batch:    
+
+            # pass an image through the network                
+            result = self.forward_pass(image)
             layer = self.layers[-1]
 
             # The final layer's activation error needs to be calculated so we can compare to the desired result. 
             delta = layer.error_output(result, answer)
 
+            # backpropagate error for each layer and caluclate gradient of cost function with respect to all weights and biases in the network
             self.backwards_pass(delta)               
             self.calculate_gradients()
 
+        # update weights and biases using previously calculated gradients
         self.update_network(rate, m)
 
     def calculate_gradients(self):
         for l in self.layers:
             l.gradients()
 
+    # update weights and biases and reset sums for next batch
     def update_network(self, rate, batch_size):
-        # update weights and biases and reset sums for next batch
         for layer in self.layers:
             layer.update_parameters(rate, batch_size)
-            #layer.weights -= (rate/batch_size)* layer.weight_sum
-            #layer.biases -= (rate/batch_size)* layer.bias_sum 
             layer.reset_gradient_sums()
-
-            # layer.weight_sum = np.zeros(layer.weights.shape)
-            # layer.bias_sum = np.zeros(layer.biases.shape)
 
 [training_data, validation_data, test_data] = load_data()
 training_data = list(training_data)
-#test_data = list(test_data)
-#5x5
-#training_data = (np.array([[-1,-1/2,-1/3,-1/4,-1/5],[1/6,1/7,1/8,1/9,1/10],[-1/11,-1/12,-1/13,-1/14,-1/15],[1/16,1/17,1/18,1/19,1/20],[-1/21,-1/22,-1/23,-1/24,-1/25]]), np.reshape(np.array([1,0,0,0,0,0,0,0,0,0]), (-1,1)))
 
 f = [Filter(5,5)]
 pf = Filter(2,2)
